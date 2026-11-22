@@ -1,7 +1,8 @@
-  server_port = "3000"                                                                                       
-                                                                                                             
-  [[cameras]]
-  name = "front-door"                                                                                        
-  ip = "192.168.1.x"                                                                                         
-  user = "admin"
-  password = "yourpassword"
+server_port = "3000"
+
+[[cameras]]
+vendor = "tapo"
+name = "front-door"
+ip = "192.168.1.20"
+user = "your-camera-user"
+password = "your-camera-password"
