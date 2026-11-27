@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use anyhow::Context;
 use serde::Deserialize;
 use toml;
 
@@ -58,7 +59,13 @@ impl Config {
             )
         });
 
-        let contents = std::fs::read_to_string(path)?;
+        let contents = std::fs::read_to_string(&path).with_context(|| {
+            format!(
+                "Failed to read config file {}. Please provide a 
+            local config file like --config-path config.toml",
+                path.display()
+            )
+        })?;
 
         Ok(toml::from_str(&contents)?)
     }
