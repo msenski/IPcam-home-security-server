@@ -4,6 +4,7 @@ mod hls;
 mod onvif;
 mod server;
 mod streamer;
+mod webrtc;
 
 use retina::codec::VideoFrame;
 use tokio::sync::mpsc;
@@ -31,6 +32,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    webrtc::try_webrtc().await?;
     let config = Config::load(Args::parse().config_path)?;
 
     let mut task_set = tokio::task::JoinSet::new();
