@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::camera::OnvifCamera;
+use crate::camera::Camera;
 use crate::config::Config;
+use crate::webrtc_handler;
 
+use ::webrtc::peer_connection::RTCSessionDescription;
 use axum::extract::{Json as ExtractJson, Path as ExtractPath, State};
 use axum::http::{HeaderValue, StatusCode, header::CACHE_CONTROL};
 use axum::{
@@ -38,7 +40,7 @@ async fn no_cache(response: axum::response::Response) -> axum::response::Respons
 /// of camera names.
 pub async fn serve(
     config: &Config,
-    cameras: Arc<HashMap<String, Arc<OnvifCamera>>>,
+    cameras: Arc<HashMap<String, Arc<Camera>>>,
 ) -> anyhow::Result<()> {
     let names: Vec<String> = config
         .cameras
@@ -57,16 +59,16 @@ pub async fn serve(
         router = router.nest_service(&hls_path, ServeDir::new(fs_path));
     }
 
-    // Add PTZ handling (using separate Router just for better readability)
-    let ptz_router = Router::new()
+    router = router
+        // Add camera-specific paths for the WebRTC negotiation
+        .route("/webrtc/{name}/offer", post(handle_webrtc_offer))
+        // Add camera-specific PTZ handling routes
         .route("/cameras/{name}/ptz/move", post(handle_ptz_move))
-        .route("/cameras/{name}/ptz/stop", post(handle_ptz_stop))
-        .with_state(cameras);
+        .route("/cameras/{name}/ptz/stop", post(handle_ptz_stop));
 
-    // Add the PTZ router to the main one
-    router = router.merge(ptz_router);
-
-    router = router.layer(middleware::map_response(no_cache));
+    let router: Router<()> = router
+        .with_state(cameras)
+        .layer(middleware::map_response(no_cache));
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.server_port)).await?;
     axum::serve(listener, router).await?;
@@ -74,8 +76,37 @@ pub async fn serve(
     Ok(())
 }
 
+async fn handle_webrtc_offer(
+    State(cameras): State<Arc<HashMap<String, Arc<Camera>>>>,
+    ExtractPath(name): ExtractPath<String>,
+    ExtractJson(offer): ExtractJson<RTCSessionDescription>,
+) -> std::result::Result<Json<RTCSessionDescription>, StatusCode> {
+    // Check if camera exists
+    let Some(_) = cameras.get(&name) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    // Try to create a PeerConnection and offer
+    let pc = match webrtc_handler::create_peer_connection().await {
+        Ok(pc) => pc,
+        Err(err) => {
+            eprint!("Failed to create WebRTC connection for {name}: {err:#}");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Send back offer to browser on success
+    match webrtc_handler::answer_offer(&pc, offer).await {
+        Ok(answer_offer) => Ok(Json(answer_offer)),
+        Err(err) => {
+            eprint!("Failed to anser SDP offer for camera {name}: {err:#}");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 async fn handle_ptz_move(
-    State(cameras): State<Arc<HashMap<String, Arc<OnvifCamera>>>>,
+    State(cameras): State<Arc<HashMap<String, Arc<Camera>>>>,
     ExtractPath(name): ExtractPath<String>,
     ExtractJson(body): ExtractJson<PtzMoveRequest>,
 ) -> StatusCode {
@@ -89,7 +120,7 @@ async fn handle_ptz_move(
 }
 
 async fn handle_ptz_stop(
-    State(cameras): State<Arc<HashMap<String, Arc<OnvifCamera>>>>,
+    State(cameras): State<Arc<HashMap<String, Arc<Camera>>>>,
     ExtractPath(name): ExtractPath<String>,
 ) -> StatusCode {
     let Some(camera) = cameras.get(&name) else {

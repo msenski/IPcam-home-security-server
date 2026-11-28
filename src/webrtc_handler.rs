@@ -1,5 +1,3 @@
-use base64::Engine;
-use base64::prelude::BASE64_STANDARD;
 use std::sync::Arc;
 
 use webrtc::peer_connection::{
@@ -43,20 +41,18 @@ pub async fn create_peer_connection() -> anyhow::Result<impl PeerConnection> {
 pub async fn answer_offer(
     pc: &impl PeerConnection,
     offer: RTCSessionDescription,
-) -> anyhow::Result<()> {
-    // // Decode the Base64 string. The webrtc examples use the signal
-    // // example lib from the rtc crate, but it is just a simple decoding
-    // // helper so we might as well do it here. See:
-    // // https://github.com/webrtc-rs/rtc/blob/cd3f08a243ced3714c965070b4fa7105dfe89c0e/examples/signal/src/lib.rs#L127
-    // let b = BASE64_STANDARD.decode(offer.trim())?;
-    // let desc_data = String::from_utf8(b)?;
-    // let offer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
-
+) -> anyhow::Result<RTCSessionDescription> {
     pc.set_remote_description(offer).await?;
     let answer = pc.create_answer(None).await?;
     pc.set_local_description(answer).await?;
 
-    Ok(())
+    // Send back the answer to the browser
+    match pc.local_description().await {
+        Some(answer) => Ok(answer),
+        None => Err(anyhow::anyhow!(
+            "Local SDP offer answer couldn't be created"
+        )),
+    }
 }
 
 pub async fn try_webrtc() -> anyhow::Result<()> {
