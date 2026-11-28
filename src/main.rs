@@ -1,10 +1,10 @@
 mod camera;
 mod config;
-mod hls;
+mod hls_handler;
 mod onvif;
 mod server;
 mod streamer;
-mod webrtc;
+mod webrtc_handler;
 
 use retina::codec::VideoFrame;
 use tokio::sync::mpsc;
@@ -17,9 +17,9 @@ use std::time::Duration;
 use clap::Parser;
 
 use config::Config;
-use hls::FFMpegWriter;
+use hls_handler::FFMpegWriter;
 
-use crate::camera::OnvifCamera;
+use crate::camera::Camera;
 use crate::streamer::Streamer;
 
 const HLS_BASE_PATH: &str = "hls";
@@ -32,18 +32,18 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    webrtc::try_webrtc().await?;
+    webrtc_handler::try_webrtc().await?;
     let config = Config::load(Args::parse().config_path)?;
 
     let mut task_set = tokio::task::JoinSet::new();
 
-    let mut cameras: HashMap<String, Arc<OnvifCamera>> = HashMap::new();
+    let mut cameras: HashMap<String, Arc<Camera>> = HashMap::new();
 
     // Setup stream and dedicated ffmpg conversion process for each camera
     for cam_cfg in config.cameras.iter() {
         let (tx, mut rx) = mpsc::channel::<VideoFrame>(100);
 
-        let camera = Arc::new(OnvifCamera::connect(cam_cfg.clone()).await?);
+        let camera = Arc::new(Camera::connect(cam_cfg.clone()).await?);
         cameras.insert(cam_cfg.name.clone(), camera.clone());
 
         let streamer = Streamer::new(
